@@ -4,17 +4,22 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
-using OpenQA.Selenium;
 using OpenQA.Selenium.Firefox;
 using OpenQA.Selenium.Support.UI;
-using System.Threading;
-using System.Threading.Tasks;
 using HtmlAgilityPack;
 
 namespace Scraper
 {
+    
+    /*
+        The way program works. We use selenium, got to the web page, get all available currencies, write them to dictionary
+        Then we use page api for sending requests (POST with headers that include currencyName, startDate, endDate and page number if 
+        page != 0 (if page == 0 we shouldn't pass any page)
+        After that we send requests and increment page number until we get "sorry no data" or something like that, meaning there is no
+        data after that page on. (Every time we get some result, we append it to a file with currency name)
+        Parsing response is done using HtmlAgilityPack.
+     */
     class Scraper
     {
         private String _URL = "https://srh.bankofchina.com/search/whpj/searchen.jsp";
@@ -51,8 +56,10 @@ namespace Scraper
         public void Main()
         {
             GetCurrency();
+            //Close SELENIUM DRIVER
             _driver.Close();
             
+            //Loop tru every currency available
             foreach (var kv in _currency)
             {
                 Console.WriteLine("Getting data for currency " + kv.Value);
@@ -60,6 +67,7 @@ namespace Scraper
             }
         }
 
+        //Get all available currencies using SELENIUM
         private void GetCurrency()
         {
                 Console.WriteLine("Fetching available currencies...");
@@ -99,6 +107,8 @@ namespace Scraper
                 StreamReader reader = new StreamReader(dataStream);
                 string responseFromServer = reader.ReadToEnd();
                 bool hasContent = HasContent(responseFromServer, currency, page);
+                //We do this for as long as there is content on the page (increment page number, send request, get response, check if
+                //it has data, if it does, write to file, increment page and keep looping)
                 while (hasContent)
                 {
                     page += 1;
@@ -112,6 +122,7 @@ namespace Scraper
             }
         }
 
+        //Send POST request and return data Stream
         public Stream MakeRequest(String currency, int page)
         {
             var handler = new HttpClientHandler();
@@ -126,6 +137,7 @@ namespace Scraper
                 request.Method = "POST";
 
                 String headers;
+                //If page == 0 we do not include it to headers
                 if (page == 0)
                 {
                     headers = String.Format(
@@ -156,6 +168,7 @@ namespace Scraper
                 return dataStream;
             }
         }
+        //Check if there is content in given response, and write it to file and return True, else return False.
         public bool HasContent(String content, String currency, int page)
         {
             var htmlDoc = new HtmlDocument();
