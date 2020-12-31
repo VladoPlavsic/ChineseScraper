@@ -5,15 +5,13 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using OpenQA.Selenium.Firefox;
-using OpenQA.Selenium.Support.UI;
 using HtmlAgilityPack;
 
 namespace Scraper
 {
     
     /*
-        The way program works. We use selenium, got to the web page, get all available currencies, write them to dictionary
+        The way program works. We send get request and fetch all available currencies, write them to dictionary.
         Then we use page api for sending requests (POST with headers that include currencyName, startDate, endDate and page number if 
         page != 0 (if page == 0 we shouldn't pass any page)
         After that we send requests and increment page number until we get "sorry no data" or something like that, meaning there is no
@@ -22,78 +20,79 @@ namespace Scraper
      */
     class Scraper
     {
-        private String _URL = "https://srh.bankofchina.com/search/whpj/searchen.jsp";
+        private readonly String _URL = "https://srh.bankofchina.com/search/whpj/searchen.jsp";
         
         //x-paths
-        private String _currencyXpath = "/html/body/table[1]/tbody/tr/td[4]/select/option[";
+        private readonly String _currencyXpath = "//option"; //Available currency options
+        private readonly String _tablePath = "/html/body/table[2]//tr"; //Table containing data
 
-        private String _dataPath;
+        private readonly String _dataPath; //Data containing folder path
         
-        private Dictionary<int, String> _currency = new Dictionary<int, String>();
+        private readonly Dictionary<int, String> _currency = new Dictionary<int, String>(); //Dictionary containing available currencies
 
-        private FirefoxDriverService _service;
-        private FirefoxDriver _driver;
-        private WebDriverWait _wait;
+        private readonly int _startingIndex = 2;
 
-        private int _startingIndex = 2;
-
-        private DateTime _startDate;
-        private DateTime _endDate;
-        private String _dtFormat = "yyyy'-'MM'-'dd";
+        private readonly DateTime _startDate;
+        private readonly DateTime _endDate;
+        private readonly String _dtFormat = "yyyy'-'MM'-'dd";
         
-        public Scraper(string path)
+        //We pass containing folder path and number of days we want to fetch data for [App.config.xml contains these data]
+        public Scraper(String path, int days)
         {
             _dataPath = path;
             _endDate = DateTime.Today;
-            _startDate = _endDate.AddDays(-2);
-            
-            _service = FirefoxDriverService.CreateDefaultService();
-            _driver = new FirefoxDriver(_service);
-            _wait = new WebDriverWait(_driver, new TimeSpan(0, 1, 0));
-            _driver.Url = _URL;
+            _startDate = _endDate.AddDays(-days);
         }
 
         public void Main()
         {
-            GetCurrency();
-            //Close SELENIUM DRIVER
-            _driver.Close();
-            
-            //Loop tru every currency available
+            //Get availabe currencies
+            GetCurrencies();
+            //Loop thru every currency available
             foreach (var kv in _currency)
             {
                 Console.WriteLine("Getting data for currency " + kv.Value);
                 GetDataForCurrency(kv.Value);
             }
         }
+        
 
-        //Get all available currencies using SELENIUM
-        private void GetCurrency()
+        //Get all available currencies
+        private void GetCurrencies()
         {
                 Console.WriteLine("Fetching available currencies...");
                 int index = _startingIndex;
 
-                while (true)
+                StreamReader reader = new StreamReader(MakeRequestCurrency());
+                String responseFromServer = reader.ReadToEnd();
+                HtmlDocument htmlDoc = new HtmlDocument();
+                htmlDoc.LoadHtml(responseFromServer);
+                
+                try
                 {
-                    try
+                    HtmlNodeCollection htmlBody =
+                        htmlDoc.DocumentNode.SelectNodes(_currencyXpath);
+                    
+                    foreach (var node in htmlBody)
                     {
-                        var element =
-                            _driver.FindElementByXPath(
-                                String.Format(_currencyXpath + index + "]"));
-
-                        _currency.Add(index, element.Text);
+                        if(node.InnerText.Contains("Select"))
+                            continue;
+                        _currency.Add(index, node.InnerText.Trim());
                         index++;
                     }
-                    catch
-                    {
-                        break;
-                    }
                 }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Exception raised " + e);
+                    return;
+                }
+       
                 Console.WriteLine(String.Format("Found {0} currencies", (index - _startingIndex)));
                 foreach (var k in _currency)
                 {
                     Console.WriteLine(String.Format("Key: {0} and Value {1}", k.Key, k.Value));
                 }
+
         }
 
         public void GetDataForCurrency(String currency)
@@ -101,11 +100,11 @@ namespace Scraper
             var page = 0;
             
             Stream dataStream; 
-            using (dataStream = MakeRequest(currency, page))
+            using (dataStream = MakeRequestData(currency, page))
             {
                 Console.WriteLine(String.Format("Fetching data from page {0} for currency {1}", page, currency));
                 StreamReader reader = new StreamReader(dataStream);
-                string responseFromServer = reader.ReadToEnd();
+                String responseFromServer = reader.ReadToEnd();
                 bool hasContent = HasContent(responseFromServer, currency, page);
                 //We do this for as long as there is content on the page (increment page number, send request, get response, check if
                 //it has data, if it does, write to file, increment page and keep looping)
@@ -113,7 +112,7 @@ namespace Scraper
                 {
                     page += 1;
                     Console.WriteLine(String.Format("Fetching data from page {0} for currency {1}", page, currency));
-                    dataStream = MakeRequest(currency, page);
+                    dataStream = MakeRequestData(currency, page);
                     reader = new StreamReader(dataStream);
                     responseFromServer = reader.ReadToEnd();
                     hasContent = HasContent(responseFromServer, currency, page);
@@ -122,8 +121,34 @@ namespace Scraper
             }
         }
 
-        //Send POST request and return data Stream
-        public Stream MakeRequest(String currency, int page)
+        //Send GET request and return data Stream (Fetching available currencies)
+        public Stream MakeRequestCurrency()
+        {
+            var handler = new HttpClientHandler();
+            handler.UseCookies = false;
+            WebResponse response;
+
+            handler.AutomaticDecompression = ~DecompressionMethods.None;
+
+            using (var httpClient = new HttpClient(handler))
+            {
+                var request = WebRequest.Create(_URL);
+                request.Method = "GET";
+            
+                request.ContentType = "application/x-www-form-urlencoded";
+
+                System.Text.EncodingProvider provider = System.Text.CodePagesEncodingProvider.Instance;
+                Encoding.RegisterProvider(provider);
+
+                response = request.GetResponse();
+
+                Stream dataStream = response.GetResponseStream();
+                return dataStream;
+            }
+        }
+        
+        //Send POST request and return data Stream (Fetching data for a currency at page=page)
+        public Stream MakeRequestData(String currency, int page)
         {
             var handler = new HttpClientHandler();
             handler.UseCookies = false;
@@ -175,23 +200,24 @@ namespace Scraper
             htmlDoc.LoadHtml(content);
 
             HtmlNodeCollection htmlBody;
-            String path;
                 try
                 {
-                    path = String.Format("/html/body/table[2]//tr");
                     htmlBody =
-                        htmlDoc.DocumentNode.SelectNodes(path);
+                        htmlDoc.DocumentNode.SelectNodes(_tablePath);
                 }
                 catch (Exception e)
                 {
                     Console.WriteLine("Exception raised " + e);
                     return false;
                 }
-                
+
+                String[] list = null;
                 using (StreamWriter sw = new StreamWriter(_dataPath + currency + _startDate.ToString(_dtFormat) + _endDate.ToString(_dtFormat) + ".csv", true))
                 {
+                    bool newLine = true;
                     foreach (var node in htmlBody)
                     {
+                        newLine = true;
                         String data = node.InnerText.Trim();
                         if (data.Contains("soryy") || data.Contains("sorry"))
                         {
@@ -199,6 +225,23 @@ namespace Scraper
                             sw.Close();
                             Console.WriteLine("No data found!");
                             return false;
+                        }
+
+                        if (list == null && page == 0)
+                        {
+                            list = data.Split(currency)[0].Split("\n");
+
+                            foreach (var line in list)
+                            {
+                                if (line.Trim().Length > 0)
+                                {
+                                    sw.Write(line.Trim());
+                                    if (line != list.Last())
+                                        sw.Write(",");
+                                }
+                            }
+
+                            sw.WriteLine();
                         }
 
                         String[] headers =
@@ -209,13 +252,13 @@ namespace Scraper
 
                         List<String> dataArr = data.Split().ToList();
                         
-                        Console.WriteLine("Printing another node of: " + currency);
                         foreach (var st in dataArr)
                         {
-                            if (st.Trim() != "" && st.Trim() != "\n" && st.Trim() != "\t")
+                            if (st.Trim().Length > 0)
                             {
-                                if (page > 0 && headers.Any(st.Contains))
+                                if (headers.Any(st.Contains))
                                 {
+                                    newLine = false;
                                     break;
                                 }
                                 if (!st.Equals(currency) && !st.Contains("Currency")) 
@@ -223,7 +266,8 @@ namespace Scraper
                                 sw.Write(st);
                             }
                         }
-                        sw.WriteLine();
+                        if(newLine)
+                            sw.WriteLine();
                     }
                 }
 

@@ -13,7 +13,8 @@ namespace Scraper
             //that's why we replace this (/bin/debug/netcoreapp3.1) part of the string.
             doc.Load(Directory.GetCurrentDirectory().Replace("/bin/Debug/netcoreapp3.1", "") + "/App.config.xml");
             String path = doc.GetElementsByTagName("Path")[0].InnerXml;
-            Scraper sc = new Scraper(path);
+            int days = Convert.ToInt32(doc.GetElementsByTagName("Days")[0].InnerXml);
+            Scraper sc = new Scraper(path, days);
             sc.Main();
         }
     }
