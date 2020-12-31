@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Threading;
 using HtmlAgilityPack;
 
 namespace Scraper
@@ -44,18 +45,64 @@ namespace Scraper
             _startDate = _endDate.AddDays(-days);
         }
 
+
         public void Main()
         {
             //Get availabe currencies
             GetCurrencies();
             //Loop thru every currency available
+            
+            //Uncomment foreach loop and comment UseThreeThreads if you want to use all threads, or leave as it is to use only 3 threads
+            
+            /* 
             foreach (var kv in _currency)
-            {
-                Console.WriteLine("Getting data for currency " + kv.Value);
-                GetDataForCurrency(kv.Value);
+            {   
+                SpawnThreads(kv.Value);
             }
+            */
+            
+            UseThreeThreads();
         }
-        
+
+        private void SpawnThreads(String currency)
+        {
+            Thread t = new Thread(() => { GetDataForCurrency(currency); });
+            t.Start();
+        }
+
+        private void UseThreeThreads()
+        {
+            int split = _currency.Count() / 3;
+            Thread t1 = new Thread(() =>
+            {
+                for (int i = _startingIndex; i < split + _startingIndex; i++)
+                {
+                    Console.WriteLine("Getting data for currency " + _currency[i]);                    
+                }
+            });
+            Thread t2 = new Thread(() =>
+            {
+                for (int i = split + _startingIndex; i < split * 2 + _startingIndex; i++)
+                {
+                    Console.WriteLine("Getting data for currency " + _currency[i]);              
+                    GetDataForCurrency(_currency[i]);
+
+                }
+            });
+            Thread t3 = new Thread(() =>
+            {
+                for (int i = split * 2 + _startingIndex; i < _currency.Count() + _startingIndex; i++)
+                {
+                    Console.WriteLine("Getting data for currency " + _currency[i]);              
+                    GetDataForCurrency(_currency[i]);
+
+                }
+            });
+            
+            t1.Start();
+            t2.Start();
+            t3.Start();
+        }
 
         //Get all available currencies
         private void GetCurrencies()
